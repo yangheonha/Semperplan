@@ -1,0 +1,1 @@
+{"name":"semperplan","version":"0.3.0","private":true,"scripts":{"dev":"vite --host 0.0.0.0","build":"vite build"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","react":"latest","react-dom":"latest","xlsx":"latest"},"devDependencies":{}}
