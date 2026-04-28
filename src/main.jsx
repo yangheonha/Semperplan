@@ -1,15 +1,571 @@
-import React,{useMemo,useState}from'react';import{createRoot}from'react-dom/client';import*as XLSX from'xlsx';import{isGoogleCalendarConfigured}from'./googleCalendar';import'./style.css';
-const K={date:['date','datum','날짜','일자'],start:['start','beginn','시작','시작시간','von'],end:['end','ende','종료','종료시간','bis'],title:['title','titel','작품','작품명','production','oper','opera'],loc:['location','ort','장소','raum'],note:['note','bemerkung','비고','내용','dienst','probe'],group:['group','gruppe','파트','stimme','chor','rolle','cast']};
-const n=x=>String(x||'').trim().toLowerCase().replace(/\s+/g,'').replace('ä','ae').replace('ö','oe').replace('ü','ue');
-function pick(r,ks){let m=Object.fromEntries(Object.keys(r).map(k=>[n(k),r[k]]));for(let k of ks){let v=m[n(k)];if(v!==undefined&&v!==null&&v!=='')return v}return''}
-const p=x=>String(x).padStart(2,'0');function excel(s){let d=new Date((Math.floor(s-25569))*86400*1000),f=s-Math.floor(s)+.000001,t=Math.floor(86400*f),h=Math.floor(t/3600),m=Math.floor(t/60)%60;return new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m)}
-function date(v){if(!v&&v!==0)return'';if(typeof v==='number'){let d=excel(v);return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`}let s=String(v).trim(),a=s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/);if(a){let[,dd,mm,y]=a;if(y.length===2)y='20'+y;return`${y}-${p(mm)}-${p(dd)}`}let b=s.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/);if(b){let[,y,mm,dd]=b;return`${y}-${p(mm)}-${p(dd)}`}return''}
-function time(v,f='09:00'){if(!v&&v!==0)return f;if(typeof v==='number'){let d=excel(v);return`${p(d.getHours())}:${p(d.getMinutes())}`}let m=String(v).match(/(\d{1,2})[:.](\d{2})/);return m?`${p(m[1])}:${m[2]}`:f}
-function addMin(d,m){return new Date(d.getTime()+m*60000)}function parse(rows,src){return rows.map((r,i)=>{let da=date(pick(r,K.date)),st=time(pick(r,K.start)),en=time(pick(r,K.end),'');if(da&&st&&!en){let[h,m]=st.split(':').map(Number),ed=addMin(new Date(`${da}T${p(h)}:${p(m)}:00`),120);en=`${p(ed.getHours())}:${p(ed.getMinutes())}`}return{id:crypto.randomUUID(),date:da,start:st,end:en,title:String(pick(r,K.title)||pick(r,K.note)||`일정 ${i+1}`).trim(),location:String(pick(r,K.loc)||'').trim(),note:String(pick(r,K.note)||'').trim(),group:String(pick(r,K.group)||'').trim(),selected:true,...src,isFirstWeek:false,replaced:''}}).filter(e=>e.date&&e.start&&e.end)}
-function firstWeek(es,type){if(type!=='weekly'||!es.length)return es;let first=es.map(e=>new Date(e.date+'T00:00:00')).sort((a,b)=>a-b)[0],end=addMin(first,7*24*60);return es.map(e=>{let d=new Date(e.date+'T00:00:00');return{...e,isFirstWeek:d>=first&&d<end}})}
-const key=e=>`${e.date}|${e.start}|${e.end}`;const sid=e=>`${e.date}_${e.start}_${e.end}_${e.title}_${e.group}_${e.location}`.toLowerCase().replace(/[^a-z0-9가-힣]+/gi,'-');
-function merge(old,neu,on){if(!on)return[...old,...neu];let next=old.map(x=>({...x}));for(let w of neu.filter(e=>e.sourceType==='weekly'&&e.isFirstWeek)){let i=next.findIndex(e=>key(e)===key(w)&&e.uploadIndex<w.uploadIndex);if(i>=0)next[i]={...w,id:next[i].id,selected:next[i].selected,replaced:`${next[i].sourceName} → 최신 주간 첫 주 일정으로 대체`};else next.push(w)}for(let e of neu.filter(e=>!(e.sourceType==='weekly'&&e.isFirstWeek))){if(!next.some(x=>key(x)===key(e)&&x.title===e.title&&x.group===e.group&&x.note===e.note))next.push(e)}return next}
-function ics(es){let stamp=new Date().toISOString().replace(/[-:]/g,'').split('.')[0]+'Z',L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//SemperPlan//KO','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:SemperPlan'];for(let e of es){let esc=t=>String(t||'').replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;'),fmt=(d,t)=>d.replaceAll('-','')+'T'+t.replace(':','')+'00';L.push('BEGIN:VEVENT',`UID:${sid(e)}@semperplan.local`,`DTSTAMP:${stamp}`,`DTSTART:${fmt(e.date,e.start)}`,`DTEND:${fmt(e.date,e.end)}`,`SUMMARY:${esc(e.title)}`,e.location?`LOCATION:${esc(e.location)}`:'',`DESCRIPTION:${esc([e.note,e.group,e.sourceName,'SemperPlan-ID: '+sid(e)].filter(Boolean).join('\n'))}`,'END:VEVENT')}return L.filter(Boolean).join('\r\n')}
-function dl(name,text,type){let a=document.createElement('a'),u=URL.createObjectURL(new Blob([text],{type}));a.href=u;a.download=name;a.click();URL.revokeObjectURL(u)}
-function App(){const[events,setEvents]=useState([]),[filters,setFilters]=useState([]),[type,setType]=useState('monthly'),[count,setCount]=useState(0),[override,setOverride]=useState(true),[err,setErr]=useState('');let tokens=useMemo(()=>Array.from(new Set(events.flatMap(e=>[e.title,e.group,e.note,e.location].flatMap(v=>String(v||'').split(/[,;/|·]+/).map(x=>x.trim()).filter(x=>x.length>1))))).sort(),[events]);let shown=events.filter(e=>!filters.length||filters.some(f=>(e.title+' '+e.group+' '+e.note+' '+e.location).toLowerCase().includes(f.toLowerCase()))),out=shown.filter(e=>e.selected);async function upload(ev){setErr('');let file=ev.target.files?.[0];if(!file)return;try{let wb=XLSX.read(await file.arrayBuffer(),{type:'array'}),rows=[];wb.SheetNames.forEach(s=>rows.push(...XLSX.utils.sheet_to_json(wb.Sheets[s],{defval:''})));let idx=count+1,parsed=firstWeek(parse(rows,{sourceType:type,sourceName:file.name,uploadIndex:idx}),type);if(!parsed.length)setErr('일정을 찾지 못했어요. 날짜/시작/종료/작품명 제목을 확인해 주세요.');setEvents(prev=>merge(prev,parsed,override));setCount(idx);ev.target.value=''}catch(e){setErr('파일 읽기 실패: .xlsx, .xls, .csv를 사용해 주세요.')}}function sample(){dl('semperplan-sample.csv','Datum,Beginn,Ende,Titel,Ort,Gruppe,Bemerkung\n2026-05-03,10:00,13:00,Carmen,Semperoper Bühne,Tenor; Herrenchor,Bühnenprobe','text/csv')}return <main><header><div className="logo">SP</div><h1>SemperPlan</h1><p>월간/주간 Dienstplan에서 내 일정만 골라 iPhone 캘린더에 넣는 도구</p></header><section><h2>1. 중복 처리</h2><label><input type="checkbox" checked={override} onChange={e=>setOverride(e.target.checked)}/> 최신 주간 파일의 첫 주 일정으로 대체</label></section><section><h2>2. 파일 업로드</h2><div className="row"><button className={type==='monthly'?'on':''} onClick={()=>setType('monthly')}>월간 일정 파일</button><button className={type==='weekly'?'on':''} onClick={()=>setType('weekly')}>주간 일정 파일</button></div><label className="upload">{type==='monthly'?'월간':'주간'} 파일 선택<input type="file" accept=".xlsx,.xls,.csv" onChange={upload}/></label><button onClick={sample}>샘플 CSV</button><button onClick={()=>{setEvents([]);setFilters([]);setCount(0)}}>전체 초기화</button>{err&&<p className="err">{err}</p>}</section>{events.length>0&&<><section className="status"><b>누적 {events.length}개</b><span>업로드 {count}개</span><span>대체 {events.filter(e=>e.replaced).length}개</span></section><section><h2>3. 내 조건 선택</h2><div className="chips">{tokens.map(t=><button key={t} className={filters.includes(t)?'chip on':'chip'} onClick={()=>setFilters(f=>f.includes(t)?f.filter(x=>x!==t):[...f,t])}>{t}</button>)}</div></section><section><h2>4. 일정 확인</h2>{shown.map(e=><button key={e.id} className="event" onClick={()=>setEvents(xs=>xs.map(x=>x.id===e.id?{...x,selected:!x.selected}:x))}><b>{e.selected?'✓':'○'} {e.date} {e.start}–{e.end}</b><strong>{e.title}</strong><small>{[e.location,e.group,e.note].filter(Boolean).join(' · ')}</small><em>{e.sourceType==='weekly'?'주간':'월간'} · {e.sourceName}{e.isFirstWeek?' · 첫 주 우선':''}</em>{e.replaced&&<i>{e.replaced}</i>}</button>)}</section><section><h2>5. 내보내기</h2><button className="primary" onClick={()=>dl('semperplan.ics',ics(out),'text/calendar')}>SemperPlan .ics 다운로드</button><button onClick={()=>dl('semperplan-sync-plan.json',JSON.stringify({app:'SemperPlan',calendarName:'SemperPlan',events:out.map(e=>({id:sid(e),...e}))},null,2),'application/json')}>동기화 계획 JSON</button><p className="warn">{isGoogleCalendarConfigured()?'Google Client ID 설정됨':'Google 자동 동기화는 .env에 VITE_GOOGLE_CLIENT_ID를 넣은 뒤 다음 단계에서 연결합니다.'}</p></section></>}</main>}
-createRoot(document.getElementById('root')).render(<App/>);
+
+import React, { useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { CalendarPlus, Upload, Download, RotateCcw, CheckCircle2, XCircle } from "lucide-react";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
+import "./style.css";
+
+GlobalWorkerOptions.workerSrc = pdfWorker;
+
+const KNOWN_WORKS = [
+  "Parsifal", "Carmen", "Elias", "Giovanni", "Traviata", "Zauberflöte", "Zauberfloete",
+  "Strawinsky", "Opernball", "Karmelitinnen", "Konzert", "Opernball", "Don Giovanni"
+];
+
+const WEEKLY_DATE_RE = /^(Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag),\s*(\d{1,2})\.\s*([A-Za-zÄÖÜäöü]+)\s*(\d{4})/i;
+const MONTHLY_LINE_RE = /^(Mo|Di|Mi|Do|Fr|Sa|So)\s+(\d{1,2})\.(\d{1,2})\.\s*(.*)$/i;
+const TIME_RE = /^(\d{1,2})[.:](\d{2})\s+(.+)$/;
+const MONTHS_DE = {
+  januar: "01", februar: "02", märz: "03", maerz: "03", april: "04", mai: "05", juni: "06",
+  juli: "07", august: "08", september: "09", oktober: "10", november: "11", dezember: "12"
+};
+
+function clean(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+function defaultEnd(date, start, long = false) {
+  const [h, m] = start.split(":").map(Number);
+  const d = new Date(`${date}T${pad(h)}:${pad(m)}:00`);
+  d.setMinutes(d.getMinutes() + (long ? 180 : 120));
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function extractWork(text) {
+  const t = clean(text);
+  for (const work of KNOWN_WORKS) {
+    const re = new RegExp(`\\b${work}\\b`, "i");
+    if (re.test(t)) return work === "Zauberfloete" ? "Zauberflöte" : work;
+  }
+  const nach = t.match(/Nachstudium\s+([A-Za-zÄÖÜäöü0-9.]+)/i);
+  if (nach) return nach[1];
+  const left = t.split(" - ")[0].trim();
+  const tokens = left.split(/\s+/).filter(Boolean);
+  return tokens[tokens.length - 1] || "Dienst";
+}
+function detectGender(text) {
+  const t = clean(text).toLowerCase();
+  if (/(alle\s+herren|\bherren\b|männer|maenner)/i.test(t)) return "남자";
+  if (/(alle\s+damen|\bdamen\b|frauen|blumenmädchen|blumenmaedchen)/i.test(t)) return "여자";
+  if (/(alle|alle\s+eingeteilten|chor tutti|sinfoniechor)/i.test(t)) return "전체";
+  return "개별/기타";
+}
+function includesNameOrSurname(event, firstName, lastName) {
+  const hay = `${event.title} ${event.note} ${event.group}`.toLowerCase();
+  const tokens = [firstName, lastName].map(clean).filter(Boolean).map(v => v.toLowerCase());
+  return tokens.some(token => hay.includes(token));
+}
+function parseWeeklyDetails(text) {
+  const parts = clean(text).split(/\s+/);
+  const location = parts[0] || "";
+  const body = parts.slice(1).join(" ");
+  const noCoach = body.replace(/\s+(Becker\/Kim|Hoffmann\/Kim|Hoffmann\/Becker\/Kim|Gatti\/Becker\/Kim|Becker|Kim|Hoffmann|Gatti)$/i, "").trim();
+  const [left, right = ""] = noCoach.split(/\s+-\s+/);
+  const work = extractWork(left);
+  const gender = detectGender(right || left);
+  return {
+    location,
+    title: clean(left),
+    note: clean(noCoach),
+    target: clean(right),
+    work,
+    gender,
+    group: [gender, clean(right)].filter(Boolean).join(" · ")
+  };
+}
+function eventKey(event) {
+  return `${event.date}|${event.start}|${event.end}`;
+}
+function stableId(event) {
+  return `${event.date}_${event.start}_${event.end}_${event.title}_${event.group}_${event.location}`
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
+}
+function shouldBeLongEvent(text) {
+  return /Vorstellung|Konzert|Opernball|Giovanni|Parsifal|Traviata|Karmelitinnen|Zauberflöte|Zauberfloete/i.test(text);
+}
+function linePassesVisibleSelection(line, selectedWorks, genderFilter, profile) {
+  if (!line.works.some(work => selectedWorks.includes(work))) return false;
+  const text = `${line.text} ${line.group || ""}`;
+  const gender = detectGender(text);
+  if (includesNameOrSurname({ title: line.text, note: line.text, group: line.group || "" }, profile.firstName, profile.lastName)) return true;
+  if (!genderFilter) return true;
+  if (genderFilter === "남자" && gender === "여자") return false;
+  if (genderFilter === "여자" && gender === "남자") return false;
+  return true;
+}
+function eventIncluded(event, selectedWorks, genderFilter, profile, excludedIds) {
+  if (!selectedWorks.includes(event.work)) return false;
+  if (excludedIds.includes(event.id)) return false;
+  if (includesNameOrSurname(event, profile.firstName, profile.lastName)) return true;
+  if (!genderFilter) return true;
+  if (genderFilter === "남자" && event.gender === "여자") return false;
+  if (genderFilter === "여자" && event.gender === "남자") return false;
+  return true;
+}
+function escapeICS(text) {
+  return String(text || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+function makeICS(events) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//SemperPlan//Schedule Export//KO",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:SemperPlan"
+  ];
+  for (const e of events) {
+    const [y, m, d] = e.date.split("-");
+    const [sh, sm] = e.start.split(":");
+    const [eh, em] = e.end.split(":");
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${stableId(e)}@semperplan.local`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${y}${m}${d}T${sh}${sm}00`,
+      `DTEND:${y}${m}${d}T${eh}${em}00`,
+      `SUMMARY:${escapeICS(e.title)}`,
+      e.location ? `LOCATION:${escapeICS(e.location)}` : "",
+      `DESCRIPTION:${escapeICS([e.note ? `비고: ${e.note}` : "", e.group ? `대상: ${e.group}` : "", e.sourceName ? `출처: ${e.sourceName}` : ""].filter(Boolean).join("\\n"))}`,
+      "END:VEVENT"
+    );
+  }
+  lines.push("END:VCALENDAR");
+  return lines.filter(Boolean).join("\r\n");
+}
+function downloadText(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function mergeSchedules(previous, incoming, weeklyOverride = true) {
+  if (!weeklyOverride) return [...previous, ...incoming];
+  const next = [...previous];
+  for (const event of incoming) {
+    const existingIndex = next.findIndex(e => eventKey(e) === eventKey(event));
+    if (existingIndex === -1) {
+      next.push(event);
+      continue;
+    }
+    const existing = next[existingIndex];
+    const shouldReplace =
+      event.sourceType === "weekly" &&
+      event.isFirstWeek &&
+      existing.uploadIndex < event.uploadIndex;
+    if (shouldReplace) {
+      next[existingIndex] = { ...event, replacementReason: `${existing.sourceName} 일정이 최신 주간 첫 주 일정으로 대체됨` };
+    } else {
+      const sameAll =
+        existing.title === event.title &&
+        existing.location === event.location &&
+        existing.group === event.group &&
+        existing.note === event.note;
+      if (!sameAll) next.push(event);
+    }
+  }
+  return next;
+}
+function markFirstWeek(events, sourceType) {
+  if (sourceType !== "weekly" || !events.length) return events;
+  const dates = events.map(e => new Date(`${e.date}T00:00:00`)).sort((a, b) => a - b);
+  const first = dates[0];
+  const end = new Date(first);
+  end.setDate(end.getDate() + 7);
+  return events.map(e => {
+    const d = new Date(`${e.date}T00:00:00`);
+    return { ...e, isFirstWeek: d >= first && d < end };
+  });
+}
+
+async function processPdf(file, sourceType, uploadIndex) {
+  const sourceName = file.name;
+  const buffer = await file.arrayBuffer();
+  const pdf = await getDocument({ data: buffer }).promise;
+  const docs = [];
+  const parsedEvents = [];
+  const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let currentWeeklyDate = "";
+  const monthlyYearGuess = (file.name.match(/(20\d{2})/) || [])[1] || String(new Date().getFullYear());
+
+  const pages = [];
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const scale = 1.6;
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const imageUrl = canvas.toDataURL("image/png");
+
+    const content = await page.getTextContent();
+    const items = content.items
+      .map((item, idx) => ({
+        id: `${docId}-p${pageNum}-i${idx}`,
+        str: clean(item.str),
+        x: item.transform[4] * scale,
+        y: item.transform[5] * scale,
+        w: (item.width || 30) * scale,
+        h: (item.height || 10) * scale
+      }))
+      .filter(item => item.str);
+
+    const rowMap = new Map();
+    for (const item of items) {
+      const key = Math.round(item.y / 6) * 6;
+      if (!rowMap.has(key)) rowMap.set(key, []);
+      rowMap.get(key).push(item);
+    }
+
+    const rows = Array.from(rowMap.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([key, rowItems], rowIndex) => {
+        const sorted = rowItems.sort((a, b) => a.x - b.x);
+        const minX = Math.min(...sorted.map(v => v.x));
+        const maxX = Math.max(...sorted.map(v => v.x + v.w));
+        const maxH = Math.max(...sorted.map(v => v.h), 16);
+        const top = viewport.height - key - maxH;
+        return {
+          id: `${docId}-p${pageNum}-row${rowIndex}`,
+          text: clean(sorted.map(v => v.str).join(" ")),
+          x: Math.max(8, minX - 6),
+          y: Math.max(8, top - 6),
+          w: Math.min(viewport.width - 16, maxX - minX + 12),
+          h: Math.max(22, maxH + 12),
+          works: [],
+          group: ""
+        };
+      })
+      .filter(row => row.text);
+
+    for (const row of rows) {
+      if (sourceType === "monthly") {
+        const match = row.text.match(MONTHLY_LINE_RE);
+        if (!match) continue;
+        const day = pad(match[2]);
+        const month = pad(match[3]);
+        const date = `${monthlyYearGuess}-${month}-${day}`;
+        const rest = clean(match[4]);
+        if (/chorfrei/i.test(rest) && !/\d{1,2}[.:]\d{2}/.test(rest)) continue;
+
+        const timeSegments = [...rest.matchAll(/(\d{1,2})[.:](\d{2})\s+([^0-9]+)/g)];
+        if (timeSegments.length > 0) {
+          for (let i = 0; i < timeSegments.length; i++) {
+            const seg = timeSegments[i];
+            const start = `${pad(seg[1])}:${seg[2]}`;
+            const segTextStart = seg.index + seg[0].indexOf(seg[3]);
+            const segTextEnd = timeSegments[i + 1]?.index ?? rest.length;
+            const detail = clean(rest.slice(segTextStart, segTextEnd));
+            const event = {
+              id: `ev-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              date,
+              start,
+              end: defaultEnd(date, start, shouldBeLongEvent(detail)),
+              title: detail,
+              location: "",
+              note: detail,
+              group: detectGender(detail),
+              gender: detectGender(detail),
+              work: extractWork(detail),
+              sourceType,
+              sourceName,
+              uploadIndex,
+              isFirstWeek: false,
+              lineId: row.id
+            };
+            parsedEvents.push(event);
+            row.works.push(event.work);
+            row.group = event.group;
+          }
+        } else if (rest && !/chorfrei/i.test(rest)) {
+          const event = {
+            id: `ev-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            date,
+            start: "09:00",
+            end: "11:00",
+            title: rest,
+            location: "",
+            note: rest,
+            group: detectGender(rest),
+            gender: detectGender(rest),
+            work: extractWork(rest),
+            sourceType,
+            sourceName,
+            uploadIndex,
+            isFirstWeek: false,
+            lineId: row.id
+          };
+          parsedEvents.push(event);
+          row.works.push(event.work);
+          row.group = event.group;
+        }
+      } else {
+        const dateMatch = row.text.match(WEEKLY_DATE_RE);
+        if (dateMatch) {
+          currentWeeklyDate = `${dateMatch[4]}-${MONTHS_DE[dateMatch[3].toLowerCase()] || "01"}-${pad(dateMatch[2])}`;
+          continue;
+        }
+        const timeMatch = row.text.match(TIME_RE);
+        if (!timeMatch || !currentWeeklyDate) continue;
+        const start = `${pad(timeMatch[1])}:${timeMatch[2]}`;
+        const detail = parseWeeklyDetails(timeMatch[3]);
+        const event = {
+          id: `ev-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          date: currentWeeklyDate,
+          start,
+          end: defaultEnd(currentWeeklyDate, start, shouldBeLongEvent(detail.title)),
+          title: detail.title,
+          location: detail.location,
+          note: detail.note,
+          group: detail.group,
+          gender: detail.gender,
+          work: detail.work,
+          sourceType,
+          sourceName,
+          uploadIndex,
+          isFirstWeek: false,
+          lineId: row.id
+        };
+        parsedEvents.push(event);
+        row.works.push(event.work);
+        row.group = event.group;
+      }
+      row.works = [...new Set(row.works.filter(Boolean))];
+    }
+
+    pages.push({
+      id: `${docId}-p${pageNum}`,
+      pageNum,
+      width: viewport.width,
+      height: viewport.height,
+      imageUrl,
+      lines: rows
+    });
+  }
+
+  return {
+    doc: { id: docId, sourceName, sourceType, pages },
+    events: markFirstWeek(parsedEvents, sourceType)
+  };
+}
+
+function App() {
+  const [docs, setDocs] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [sourceType, setSourceType] = useState("monthly");
+  const [selectedWorks, setSelectedWorks] = useState([]);
+  const [excludedIds, setExcludedIds] = useState([]);
+  const [profile, setProfile] = useState({ firstName: "", lastName: "" });
+  const [genderFilter, setGenderFilter] = useState("남자");
+  const [uploadCount, setUploadCount] = useState(0);
+  const [error, setError] = useState("");
+
+  const works = useMemo(
+    () => [...new Set(events.map(e => e.work).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [events]
+  );
+  const selectedEvents = useMemo(
+    () => events.filter(e => eventIncluded(e, selectedWorks, genderFilter, profile, excludedIds)),
+    [events, selectedWorks, genderFilter, profile, excludedIds]
+  );
+
+  async function handleUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError("");
+    try {
+      const nextUpload = uploadCount + 1;
+      const { doc, events: newEvents } = await processPdf(file, sourceType, nextUpload);
+      setDocs(prev => [...prev, doc]);
+      setEvents(prev => mergeSchedules(prev, newEvents, true));
+      setUploadCount(nextUpload);
+      event.target.value = "";
+    } catch (err) {
+      console.error(err);
+      setError("PDF를 읽는 중 문제가 생겼어요. 텍스트가 들어 있는 PDF인지 확인해 주세요.");
+    }
+  }
+
+  function resetAll() {
+    setDocs([]);
+    setEvents([]);
+    setSelectedWorks([]);
+    setExcludedIds([]);
+    setProfile({ firstName: "", lastName: "" });
+    setGenderFilter("남자");
+    setUploadCount(0);
+    setError("");
+  }
+
+  function toggleLineSelection(line) {
+    if (!line.works.length) return;
+    setSelectedWorks(prev => {
+      const next = new Set(prev);
+      const allSelected = line.works.every(work => next.has(work));
+      if (allSelected) {
+        line.works.forEach(work => next.delete(work));
+      } else {
+        line.works.forEach(work => next.add(work));
+      }
+      return [...next];
+    });
+  }
+
+  function toggleEventExclude(id) {
+    setExcludedIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  }
+
+  function exportICS() {
+    downloadText("semperplan.ics", makeICS(selectedEvents), "text/calendar;charset=utf-8");
+  }
+
+  return (
+    <main className="page">
+      <section className="hero">
+        <div className="heroLogo"><CalendarPlus size={30} /></div>
+        <div>
+          <h1>SemperPlan</h1>
+          <p>PDF 원본 화면을 그대로 보고, 텍스트를 눌러 선택한 뒤 안전하게 .ics 파일로 내보냅니다.</p>
+        </div>
+      </section>
+
+      <section className="topPanel">
+        <div className="card controls">
+          <h2>1. PDF 업로드</h2>
+          <div className="toggleRow">
+            <button className={sourceType === "monthly" ? "tab active" : "tab"} onClick={() => setSourceType("monthly")}>월간 PDF</button>
+            <button className={sourceType === "weekly" ? "tab active" : "tab"} onClick={() => setSourceType("weekly")}>주간 PDF</button>
+          </div>
+          <label className="uploadButton">
+            <Upload size={18} />
+            <span>{sourceType === "monthly" ? "월간 PDF 업로드" : "주간 PDF 업로드"}</span>
+            <input type="file" accept=".pdf" onChange={handleUpload} />
+          </label>
+          {error ? <p className="error">{error}</p> : null}
+          <p className="hint">주간 PDF의 첫 주 일정은 같은 날짜/시간의 월간 일정보다 우선 적용됩니다.</p>
+          <div className="metaRow">
+            <span>업로드 파일 수: {uploadCount}</span>
+            <span>파싱된 일정 수: {events.length}</span>
+          </div>
+          <button className="ghost" onClick={resetAll}><RotateCcw size={16} /> 전체 초기화</button>
+        </div>
+
+        <div className="card controls">
+          <h2>2. 조건 설정</h2>
+          <div className="twoInputs">
+            <label>
+              이름
+              <input value={profile.firstName} onChange={e => setProfile({ ...profile, firstName: e.target.value })} placeholder="예: Younghun" />
+            </label>
+            <label>
+              성
+              <input value={profile.lastName} onChange={e => setProfile({ ...profile, lastName: e.target.value })} placeholder="예: Ha" />
+            </label>
+          </div>
+          <div className="toggleRow">
+            <button className={genderFilter === "남자" ? "tab active" : "tab"} onClick={() => setGenderFilter("남자")}>남자</button>
+            <button className={genderFilter === "여자" ? "tab active" : "tab"} onClick={() => setGenderFilter("여자")}>여자</button>
+            <button className={genderFilter === "" ? "tab active" : "tab"} onClick={() => setGenderFilter("")}>전체</button>
+          </div>
+          <div className="chips">
+            {works.length === 0 ? <span className="muted">PDF 텍스트를 누르면 작품이 선택돼요.</span> : null}
+            {works.map(work => (
+              <button key={work} className={selectedWorks.includes(work) ? "chip active" : "chip"} onClick={() => setSelectedWorks(prev => prev.includes(work) ? prev.filter(v => v !== work) : [...prev, work])}>
+                {work}
+              </button>
+            ))}
+          </div>
+          <p className="hint">텍스트를 누르면 해당 작품이 자동 선택되고, 같은 작품 일정들이 한 번에 색칠됩니다.</p>
+        </div>
+
+        <div className="card exportBox">
+          <h2>3. 결과</h2>
+          <p className="bigCount">{selectedEvents.length}개 일정 선택됨</p>
+          <p className="hint">이 결과는 iPhone 캘린더에 넣을 수 있는 .ics 파일로 내려받습니다.</p>
+          <button className="primary" onClick={exportICS} disabled={!selectedEvents.length}><Download size={18} /> 안전한 ICS 다운로드</button>
+        </div>
+      </section>
+
+      <section className="workspace">
+        <div className="leftPane">
+          {docs.length === 0 ? (
+            <div className="emptyState">
+              <p>여기에 업로드한 PDF 원본이 그대로 보입니다.</p>
+              <p>텍스트를 누르면 같은 작품의 일정이 선택됩니다.</p>
+            </div>
+          ) : (
+            docs.map(doc => (
+              <section key={doc.id} className="docBlock">
+                <div className="docHeader">
+                  <strong>{doc.sourceName}</strong>
+                  <span>{doc.sourceType === "monthly" ? "월간 PDF" : "주간 PDF"}</span>
+                </div>
+                {doc.pages.map(page => (
+                  <div key={page.id} className="pdfPageWrap">
+                    <div className="pdfPage" style={{ width: page.width, height: page.height }}>
+                      <img src={page.imageUrl} alt={`PDF page ${page.pageNum}`} width={page.width} height={page.height} />
+                      {page.lines.map(line => {
+                        const active = linePassesVisibleSelection(line, selectedWorks, genderFilter, profile);
+                        return (
+                          <button
+                            key={line.id}
+                            className={active ? "lineOverlay active" : "lineOverlay"}
+                            style={{ left: line.x, top: line.y, width: line.w, height: line.h }}
+                            onClick={() => toggleLineSelection(line)}
+                            title={line.text}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            ))
+          )}
+        </div>
+
+        <aside className="rightPane">
+          <div className="card selectedCard">
+            <h2>선택된 일정</h2>
+            <p className="hint">마지막으로 사람 눈으로 확인하고, 필요하면 개별 일정만 빼면 됩니다.</p>
+            <div className="selectedList">
+              {selectedEvents.length === 0 ? <p className="muted">아직 선택된 일정이 없습니다.</p> : null}
+              {selectedEvents.map(ev => {
+                const excluded = excludedIds.includes(ev.id);
+                return (
+                  <div key={ev.id} className={excluded ? "eventItem excluded" : "eventItem"}>
+                    <div className="eventHead">
+                      <CheckCircle2 size={16} />
+                      <strong>{ev.date} {ev.start}–{ev.end}</strong>
+                    </div>
+                    <div className="eventBody">
+                      <div>{ev.title}</div>
+                      <small>{[ev.location, ev.work, ev.group].filter(Boolean).join(" · ")}</small>
+                    </div>
+                    <button className="excludeBtn" onClick={() => toggleEventExclude(ev.id)}>
+                      {excluded ? <><CheckCircle2 size={16} /> 다시 포함</> : <><XCircle size={16} /> 이 일정 제외</>}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<App />);
