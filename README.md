@@ -1,36 +1,52 @@
-# SemperPlan v5
+# SemperPlan v8
 
-SemperPlan v5는 **PDF 원본 화면을 그대로 보여주고**, 그 위에서 텍스트 줄을 눌러 작품을 선택한 다음,
-최종적으로 **안전한 `.ics` 파일**을 내려받아 iPhone 캘린더에 넣는 버전입니다.
+PDF 원본 화면을 그대로 보면서 텍스트를 눌러 작품을 선택하고, 선택된 일정으로 **SemperPlan 전용 Google Calendar를 부분 동기화**하는 버전입니다.
 
-## 핵심 기능
+## v8 핵심 수정
 
-- 월간 PDF / 주간 PDF 업로드
+v7은 SemperPlan 캘린더의 기존 일정을 모두 삭제하는 방식이었지만, v8은 더 안전하게 바뀌었습니다.
+
+- 기존 SemperPlan 캘린더 전체 삭제 ❌
+- 현재 선택된 최신 일정과 겹치는 기존 일정만 삭제 ✅
+- 안 겹치는 기존 SemperPlan 일정은 유지 ✅
+- 개인 기본 캘린더는 건드리지 않음 ✅
+
+## 중복 판단 기준
+
+기존 Google Calendar 일정과 새 선택 일정이 아래 중 하나에 해당하면 겹치는 일정으로 봅니다.
+
+1. 날짜 + 시작 시간 + 종료 시간이 같음
+2. SemperPlan-ID가 같음
+
+겹치는 기존 일정은 삭제한 뒤, 현재 선택된 최신 일정이 새로 추가됩니다.
+
+## 기능
+
 - PDF 원본 화면 그대로 표시
-- PDF 위의 텍스트 줄 클릭 가능
-- 클릭한 줄에 해당하는 **작품 전체 일정 자동 선택**
-- 남자 / 여자 / 전체 필터
-- 이름 / 성 입력으로 개별 이름이 적힌 일정 반영
-- 마지막에 **개별 일정 제외** 가능
-- 최신 주간 PDF의 **첫 주 일정 우선 적용**
-- 최종 결과를 `.ics`로 다운로드
+- PDF 위 텍스트 클릭 가능
+- 작품 선택 필터 저장
+- 이름/성 저장
+- 남자/여자/전체 필터 저장
+- 추가 작품명/별명 저장
+- 최신 주간 PDF 첫 주 일정 우선 적용
+- 최종 일정 개별 제외
+- Google Calendar 부분 동기화
+- `.ics 백업 다운로드` 유지
 
-## 사용 흐름
+## Google Calendar 설정
 
-1. 월간 PDF 업로드
-2. 주간 PDF 업로드
-3. PDF 원본에서 필요한 줄 클릭
-4. 오른쪽 선택된 일정 확인
-5. 필요 없는 일정은 `이 일정 제외`
-6. `안전한 ICS 다운로드`
-
-## 실행
+Vercel 환경변수에 다음 값을 추가해야 합니다.
 
 ```bash
-npm install
-npm run dev
+VITE_GOOGLE_CLIENT_ID=구글에서_받은_OAuth_Client_ID
 ```
 
-## 배포
+Google OAuth Client의 Authorized JavaScript origins에는 Vercel 앱 주소를 넣어야 합니다.
 
-GitHub에 올린 뒤 Vercel로 배포하면 됩니다.
+## Vercel 반영
+
+```bash
+git add .
+git commit -m "sync only overlapping SemperPlan events"
+git push
+```

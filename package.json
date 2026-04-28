@@ -1,6 +1,6 @@
 {
   "name": "semperplan",
-  "version": "0.5.0",
+  "version": "0.8.0",
   "private": true,
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -13,5 +13,6 @@
     "vite": "latest",
     "pdfjs-dist": "latest",
     "lucide-react": "latest"
-  }
+  },
+  "devDependencies": {}
 }
