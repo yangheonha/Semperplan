@@ -1,6 +1,6 @@
 {
   "name": "semperplan",
-  "version": "0.8.0",
+  "version": "1.0.0-final-candidate",
   "private": true,
   "scripts": {
     "dev": "vite --host 0.0.0.0",
